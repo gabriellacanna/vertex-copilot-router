@@ -4,6 +4,12 @@ import { costOf, type ModelSpec, type Usage } from './catalog.ts';
 interface Bucket { requests: number; input: number; output: number; cacheRead: number; cacheWrite: number; cost: number; unpriced: number }
 type ByModel = Record<string, Bucket>;
 const KEY = 'vertexCopilot.costs.v1';
+const LOG_KEY = 'vertexCopilot.requests.v1';
+const LOG_MAX = 20_000; // ~2 MB of globalState; oldest entries roll off
+
+export type Source = 'picker' | '@vertex' | 'ping';
+/** One request, kept for the dashboard. Short keys keep globalState small. */
+export interface Entry { t: number; s: string; p: string; m: string; src: Source; i: number; o: number; cr: number; cw: number; c: number | null }
 const empty = (): Bucket => ({ requests: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, unpriced: 0 });
 const usd = (n: number) => `$${n < 1 ? n.toFixed(4) : n.toFixed(2)}`;
 const k = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
@@ -15,7 +21,7 @@ function add(b: ByModel, model: string, u: Usage, cost: number | undefined) {
   if (cost === undefined) x.unpriced++; else x.cost += cost;
 }
 
-type Node = { label: string; description?: string; tooltip?: string; children?: Node[]; icon?: string };
+type Node = { label: string; description?: string; tooltip?: string; children?: Node[]; icon?: string; command?: string };
 
 export class CostTracker implements vscode.TreeDataProvider<Node> {
   private session: ByModel = {};
@@ -24,24 +30,29 @@ export class CostTracker implements vscode.TreeDataProvider<Node> {
   private changed = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this.changed.event;
   readonly status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-  onRecorded?: () => void;
+  private recorded = new vscode.EventEmitter<void>();
+  readonly onDidRecord = this.recorded.event;
 
   constructor(private state: vscode.Memento, private project: () => string) {
-    this.status.command = 'vertexCopilot.costs.focus';
+    this.status.command = 'vertexCopilot.openDashboard';
     this.render();
     this.status.show();
   }
 
   private all(): Record<string, ByModel> { return this.state.get(KEY, {}); }
 
-  async record(model: ModelSpec, u: Usage) {
+  history(): Entry[] { return this.state.get<Entry[]>(LOG_KEY, []); }
+
+  async record(model: ModelSpec, u: Usage, src: Source) {
     const cost = costOf(model.pricing, u);
     const project = this.project() || '(none)';
     add(this.session, model.id, u, cost);
     const all = this.all();
     add((all[project] ??= {}), model.id, u, cost);
-    await this.state.update(KEY, all);
-    this.onRecorded?.();
+    const log = this.history();
+    log.push({ t: Date.now(), s: vscode.env.sessionId, p: project, m: model.id, src, i: u.input, o: u.output, cr: u.cacheRead, cw: u.cacheWrite, c: cost ?? null });
+    await Promise.all([this.state.update(KEY, all), this.state.update(LOG_KEY, log.slice(-LOG_MAX))]);
+    this.recorded.fire();
     this.last = `${model.name}: ${k(u.input + u.cacheRead + u.cacheWrite)} in / ${k(u.output)} out · ${cost === undefined ? 'price unknown' : usd(cost)}`;
     this.render();
     const budget = vscode.workspace.getConfiguration('vertexCopilot').get<number>('budgetUsd', 0);
@@ -52,7 +63,7 @@ export class CostTracker implements vscode.TreeDataProvider<Node> {
     }
   }
 
-  async reset() { this.session = {}; this.last = undefined; this.warned = false; await this.state.update(KEY, {}); this.render(); }
+  async reset() { this.session = {}; this.last = undefined; this.warned = false; await Promise.all([this.state.update(KEY, {}), this.state.update(LOG_KEY, [])]); this.render(); this.recorded.fire(); }
 
   /** All-time spend on the current project for one model. */
   spent(model: string): Bucket { return this.all()[this.project() || '(none)']?.[model] ?? empty(); }
@@ -78,6 +89,7 @@ export class CostTracker implements vscode.TreeDataProvider<Node> {
     const all = this.all();
     const s = sum(this.session);
     const nodes: Node[] = [
+      { label: 'Open cost dashboard', icon: 'graph', command: 'vertexCopilot.openDashboard' },
       { label: 'Project', description: `${this.project() || 'not set'} · ${vscode.workspace.getConfiguration('vertexCopilot').get('location')}`, icon: 'project' },
       { label: 'This session', description: `${usd(s.cost)} · ${s.requests} req`, children: this.models(this.session), icon: 'pulse' },
       ...Object.entries(all).map(([p, b]) => ({ label: `All time · ${p}`, description: usd(sum(b).cost), children: this.models(b), icon: 'history' })),
@@ -91,6 +103,7 @@ export class CostTracker implements vscode.TreeDataProvider<Node> {
     t.description = n.description;
     t.tooltip = n.tooltip ?? n.description;
     if (n.icon) t.iconPath = new vscode.ThemeIcon(n.icon);
+    if (n.command) t.command = { command: n.command, title: n.label };
     return t;
   }
 }

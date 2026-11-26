@@ -2,7 +2,7 @@
   "name": "vertex-copilot-router",
   "displayName": "Vertex Router for GitHub Copilot",
   "description": "Use Claude and Gemini models from your own Google Cloud Vertex AI project inside GitHub Copilot Chat, with live cost tracking. Hard allowlist: only Anthropic and Google models can ever be called.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publisher": "lacanna",
   "license": "MIT",
   "repository": {
@@ -49,6 +49,12 @@
       }
     ],
     "commands": [
+      {
+        "command": "vertexCopilot.openDashboard",
+        "title": "Open Cost Dashboard",
+        "category": "Vertex Copilot",
+        "icon": "$(graph)"
+      },
       {
         "command": "vertexCopilot.selectProject",
         "title": "Select GCP Project",
@@ -105,6 +111,11 @@
     },
     "menus": {
       "view/title": [
+        {
+          "command": "vertexCopilot.openDashboard",
+          "when": "view == vertexCopilot.costs",
+          "group": "navigation"
+        },
         {
           "command": "vertexCopilot.resetCosts",
           "when": "view == vertexCopilot.costs",

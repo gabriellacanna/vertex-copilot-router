@@ -6,6 +6,7 @@ import { streamClaude } from './claude.ts';
 import { streamGemini } from './gemini.ts';
 import { CostTracker } from './costs.ts';
 import { createVertexParticipant } from './participant.ts';
+import { Dashboard } from './dashboard.ts';
 
 const log = vscode.window.createOutputChannel('Vertex Copilot', { log: true });
 const streamerFor = (m: ModelSpec): Streamer => (m.publisher === 'anthropic' ? streamClaude : streamGemini);
@@ -61,7 +62,7 @@ class VertexProvider implements vscode.LanguageModelChatProvider {
         progress, signal: ac.signal, maxTokens: Math.min(model.maxOutput, 64_000),
       });
       log.info(`${model.id} ok in=${usage.input} out=${usage.output} cacheRead=${usage.cacheRead} cacheWrite=${usage.cacheWrite}`);
-      await this.costs.record(model, usage);
+      await this.costs.record(model, usage, 'picker');
     } catch (err) {
       if (token.isCancellationRequested) return;
       log.error(`${model.id} failed: ${explain(err)}`);
@@ -78,7 +79,8 @@ class VertexProvider implements vscode.LanguageModelChatProvider {
 export function activate(context: vscode.ExtensionContext) {
   const costs = new CostTracker(context.globalState, () => project);
   const provider = new VertexProvider(costs);
-  costs.onRecorded = () => provider.refresh();
+  costs.onDidRecord(() => provider.refresh());
+  const dashboard = new Dashboard(context.extensionUri, costs, () => project);
   void currentProject().then(p => { project = p; costs.render(); log.info(p ? `using project ${p}` : 'no GCP project detected'); });
   const update = async (key: string, value: unknown) => { await cfg().update(key, value, target()); provider.refresh(); };
 
@@ -87,6 +89,7 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.lm.registerLanguageModelChatProvider('vertex-copilot', provider),
     vscode.window.registerTreeDataProvider('vertexCopilot.costs', costs),
     createVertexParticipant(costs, streamerFor),
+    vscode.commands.registerCommand('vertexCopilot.openDashboard', () => dashboard.open()),
 
     vscode.commands.registerCommand('vertexCopilot.selectParticipantModel', async () => {
       const current = cfg().get<string>('participant.model');
@@ -156,7 +159,7 @@ export function activate(context: vscode.ExtensionContext) {
           const sub = token.onCancellationRequested(() => ac.abort());
           try {
             const usage = await streamerFor(m)({ ctx, model: m, messages: [vscode.LanguageModelChatMessage.User('Reply with: ok')], tools: [], toolMode: vscode.LanguageModelChatToolMode.Auto, progress: { report() {} }, signal: ac.signal, maxTokens: 16 });
-            await costs.record(m, usage);
+            await costs.record(m, usage, 'ping');
             log.info(`✓ ${m.id} available in ${ctx.project}/${ctx.location}`);
             ok++;
           } catch (err) { log.warn(`✗ ${m.id}: ${explain(err)}`); }

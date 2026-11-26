@@ -34,7 +34,12 @@ Everything else is blocked: other publishers (Qwen, DeepSeek, Kimi/Moonshot, GLM
 - **`@vertex` in Copilot Chat** (works even when BYOK models are blocked by policy): type `@vertex` in a **Local** chat session to talk to Claude/Gemini on your project directly. It keeps the conversation, reads `#file`/selection references, can use Copilot's agent tools (file edits, terminal, search; Copilot asks you to confirm as usual), and ends each answer with tokens and cost. `/model` switches the model (default Claude Opus 5.5).
 
 - **Copilot model provider** with streaming, tool calling (agent mode), Claude prompt caching, and replay of Claude thinking blocks and Gemini thought signatures between tool calls.
-- **Costs**: status bar shows this session's spend; the *Vertex Copilot → Costs* view breaks it down per model and per project (input, output, cache read/write tokens), with all-time totals and an optional budget warning (`vertexCopilot.budgetUsd`).
+- **Cost dashboard**: click the status bar item (or the graph icon in the *Vertex Copilot → Costs* view) to open it. It has:
+  - spend, requests, tokens, cache hit rate and budget tiles;
+  - filters for this session, today, 7 days, 30 days or all time, and per project;
+  - a stacked spend-over-time chart by model, and breakdowns by model and by source (picker, `@vertex`, pings);
+  - a sessions table (one per VS Code window; click a row to drill in) and a table of recent requests;
+  - CSV export. It follows your VS Code theme.
 - **Check Model Availability**: pings the allowlisted models you choose with a tiny request (a fraction of a cent, also counted in costs).
 - **Always-current model list**: every 6 hours (and on **Refresh Model List**) the extension reads the Vertex catalog for the two allowed publishers and adds new Claude/Gemini chat models to the picker automatically. Built-in prices cover the current lineup; newly discovered models show "price unknown" until you set prices in `vertexCopilot.extraModels`.
 - **Select Vertex Location**: `global` (default) or a region such as `us-east5`.

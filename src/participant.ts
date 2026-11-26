@@ -83,7 +83,7 @@ export function createVertexParticipant(costs: CostTracker, streamerFor: (m: Mod
           } },
         });
         for (const f of Object.keys(total) as (keyof Usage)[]) total[f] += usage[f];
-        await costs.record(model, usage);
+        await costs.record(model, usage, '@vertex');
         if (!calls.length) break;
 
         messages.push(vscode.LanguageModelChatMessage.Assistant([...(text ? [new vscode.LanguageModelTextPart(text)] : []), ...calls]));
