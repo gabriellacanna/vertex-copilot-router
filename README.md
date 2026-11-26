@@ -19,18 +19,15 @@ Everything else is blocked: other publishers (Qwen, DeepSeek, Kimi/Moonshot, GLM
 
 1. Have VS Code 1.104 or newer with GitHub Copilot Chat signed in.
 2. Authenticate to Google Cloud (pick one with **Vertex Copilot: Select Authentication**):
-   - **User credentials (default)**: Application Default Credentials.
-     ```bash
-     gcloud auth application-default login
-     ```
+   - **Automatic (default)**: uses Application Default Credentials if you've set them up, otherwise the account you're signed into with `gcloud auth login`. Nothing to configure.
    - **Impersonate a service account (recommended for service accounts)**: your ADC user mints short-lived tokens for the service account, so no key file exists. Your user needs `roles/iam.serviceAccountTokenCreator` on the service account.
    - **Service account key file**: a JSON key on disk. It must be `chmod 600`, and only plain `service_account` keys with Google's own token URI are accepted.
 
    Whichever identity you use needs `roles/aiplatform.user` on the project. Auth settings are user-level only, so a workspace can't switch your identity.
 3. Enable Claude models in Vertex AI Model Garden for your project (Gemini is on by default).
 4. Install **Vertex Router for GitHub Copilot** (`lacanna.vertex-copilot-router`) from the VS Code Marketplace, or the `.vsix` from [Releases](https://github.com/gabriellacanna/vertex-copilot-router/releases) via **Extensions → … → Install from VSIX**.
-5. Run **Vertex Copilot: Select GCP Project**, or click *Manage* next to "Vertex AI (Claude & Gemini)" in Copilot's model picker → *Manage Models*.
-6. Pick a model such as *Claude Opus 5.5* or *Gemini 3.1 Pro* in the Copilot Chat model picker.
+5. The project is picked up automatically from `gcloud config get-value project` (or `GOOGLE_CLOUD_PROJECT`); set `vertexCopilot.projectId` only to override it.
+6. In Copilot Chat open the model picker → *Manage Models…* → **Vertex Models**, tick the models you want once, then choose one. Each model shows what you've spent on it on this project, e.g. `$0.42 spent · $4/$20 per 1M`.
 
 ## Features
 
@@ -44,10 +41,10 @@ Everything else is blocked: other publishers (Qwen, DeepSeek, Kimi/Moonshot, GLM
 
 | Setting | Default | |
 |---|---|---|
-| `vertexCopilot.auth.mode` | `adc` | `adc`, `impersonate` or `keyFile` (user settings only) |
+| `vertexCopilot.auth.mode` | `auto` | `auto`, `gcloud`, `adc`, `impersonate` or `keyFile` (user settings only) |
 | `vertexCopilot.auth.serviceAccount` | `""` | Service account email for `impersonate` |
 | `vertexCopilot.auth.keyFile` | `""` | Path to a service account JSON key for `keyFile` |
-| `vertexCopilot.projectId` | `""` | GCP project used for requests and billing |
+| `vertexCopilot.projectId` | `""` | Override the gcloud default project |
 | `vertexCopilot.location` | `global` | Vertex location |
 | `vertexCopilot.budgetUsd` | `0` | Warn when all-time spend for the project reaches this (0 = off) |
 | `vertexCopilot.extraModels` | `[]` | `{ id, name?, inputPer1M?, outputPer1M?, cacheReadPer1M?, maxInputTokens?, maxOutputTokens? }`; only `claude-*` / `gemini-*` IDs |

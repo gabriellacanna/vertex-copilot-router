@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { GoogleAuth, Impersonated, JWT } from 'google-auth-library';
 import { readFileSync, statSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { guardedFetch, isAllowedModel, LOCATION, PROJECT_ID, type Publisher } from './guard.ts';
 import { buildCatalog, type ExtraModelSetting, type ModelSpec, type Usage } from './catalog.ts';
 
@@ -24,14 +26,14 @@ export async function refreshDiscovered(project: string, maxAgeMs = 6 * 3600_000
 
 const SCOPES = ['https://www.googleapis.com/auth/cloud-platform'];
 export const SA_EMAIL = /^([a-z][a-z0-9-]{4,29}@[a-z][a-z0-9-]{4,29}\.iam\.gserviceaccount\.com|\d+-compute@developer\.gserviceaccount\.com)$/;
-export type AuthMode = 'adc' | 'impersonate' | 'keyFile';
+export type AuthMode = 'auto' | 'adc' | 'gcloud' | 'impersonate' | 'keyFile';
 
 // Credentials come from Google's own chain (gcloud ADC, impersonation, or a key file the user picks).
 // The extension never stores, prompts for, or logs a secret. Auth settings are application-scoped,
 // so a workspace's .vscode/settings.json can't switch identities.
 let cached: { key: string; auth: Promise<GoogleAuth> } | undefined;
 export function getAuth(): Promise<GoogleAuth> {
-  const mode = cfg().get<AuthMode>('auth.mode', 'adc');
+  const mode = cfg().get<AuthMode>('auth.mode', 'auto');
   const sa = cfg().get<string>('auth.serviceAccount', '').trim();
   const keyFile = cfg().get<string>('auth.keyFile', '').trim();
   const key = `${mode}|${sa}|${keyFile}`;
@@ -62,13 +64,53 @@ async function buildAuth(mode: AuthMode, sa: string, keyFile: string): Promise<G
     if (k.token_uri && k.token_uri !== 'https://oauth2.googleapis.com/token') throw new Error(`Refusing key file with unexpected token_uri.`);
     return new GoogleAuth({ authClient: new JWT({ email: k.client_email, key: k.private_key, keyId: k.private_key_id, scopes: SCOPES }) });
   }
-  return new GoogleAuth({ scopes: SCOPES });
+  if (mode === 'gcloud') return gcloudAuth();
+  const adc = new GoogleAuth({ scopes: SCOPES });
+  if (mode === 'adc') return adc;
+  // auto: ADC when it works, otherwise the session from `gcloud auth login`.
+  try { await adc.getRequestHeaders(); return adc; }
+  catch (adcErr) {
+    try { const g = gcloudAuth(); await g.getRequestHeaders(); return g; }
+    catch { throw new Error(`No usable Google credentials (${adcErr instanceof Error ? adcErr.message : adcErr}). Run "gcloud auth login" or "gcloud auth application-default login".`); }
+  }
+}
+
+// Fixed argv, no shell: nothing from settings or the workspace reaches the command line.
+const run = promisify(execFile);
+const gcloud = async (...args: string[]) =>
+  (await run(process.platform === 'win32' ? 'gcloud.cmd' : 'gcloud', args, { timeout: 20_000, windowsHide: true, shell: process.platform === 'win32' })).stdout.trim();
+
+/** Uses the gcloud CLI's logged-in user. Tokens are cached in memory only, never logged. */
+function gcloudAuth(): GoogleAuth {
+  let token = '', exp = 0;
+  const client = {
+    projectId: undefined,
+    async getRequestHeaders() {
+      if (Date.now() > exp) { token = await gcloud('auth', 'print-access-token', '--quiet'); exp = Date.now() + 45 * 60_000; }
+      return new Headers({ authorization: `Bearer ${token}` });
+    },
+  };
+  return new GoogleAuth({ authClient: client as any });
+}
+
+let detected: { at: number; p: Promise<string> } | undefined;
+/** Settings first, then GOOGLE_CLOUD_PROJECT, then `gcloud config get-value project`. */
+export async function currentProject(): Promise<string> {
+  const set = cfg().get<string>('projectId', '').trim();
+  if (set) return set;
+  if (!detected || Date.now() - detected.at > 60_000) detected = { at: Date.now(), p: (async () => {
+    const env = process.env.GOOGLE_CLOUD_PROJECT ?? process.env.CLOUDSDK_CORE_PROJECT ?? '';
+    if (PROJECT_ID.test(env)) return env;
+    try { const p = await gcloud('config', 'get-value', 'project', '--quiet'); if (PROJECT_ID.test(p)) return p; } catch { /* gcloud missing */ }
+    return '';
+  })() };
+  return detected.p;
 }
 
 export async function vertexCtx(): Promise<VertexCtx> {
-  const project = cfg().get<string>('projectId', '').trim();
+  const project = await currentProject();
   const location = cfg().get<string>('location', 'global').trim();
-  if (!PROJECT_ID.test(project)) throw new Error('No valid GCP project selected. Run "Vertex Copilot: Select GCP Project".');
+  if (!PROJECT_ID.test(project)) throw new Error('No GCP project found. Run "gcloud config set project <id>" or "Vertex Copilot: Select GCP Project".');
   if (!LOCATION.test(location)) throw new Error(`Invalid Vertex location "${location}".`);
   return { project, location, host: location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`, auth: await getAuth() };
 }

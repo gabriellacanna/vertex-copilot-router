@@ -24,6 +24,7 @@ export class CostTracker implements vscode.TreeDataProvider<Node> {
   private changed = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this.changed.event;
   readonly status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  onRecorded?: () => void;
 
   constructor(private state: vscode.Memento, private project: () => string) {
     this.status.command = 'vertexCopilot.costs.focus';
@@ -40,6 +41,7 @@ export class CostTracker implements vscode.TreeDataProvider<Node> {
     const all = this.all();
     add((all[project] ??= {}), model.id, u, cost);
     await this.state.update(KEY, all);
+    this.onRecorded?.();
     this.last = `${model.name}: ${k(u.input + u.cacheRead + u.cacheWrite)} in / ${k(u.output)} out · ${cost === undefined ? 'price unknown' : usd(cost)}`;
     this.render();
     const budget = vscode.workspace.getConfiguration('vertexCopilot').get<number>('budgetUsd', 0);
@@ -52,9 +54,12 @@ export class CostTracker implements vscode.TreeDataProvider<Node> {
 
   async reset() { this.session = {}; this.last = undefined; this.warned = false; await this.state.update(KEY, {}); this.render(); }
 
-  private render() {
+  /** All-time spend on the current project for one model. */
+  spent(model: string): Bucket { return this.all()[this.project() || '(none)']?.[model] ?? empty(); }
+
+  render() {
     const s = sum(this.session);
-    this.status.text = `$(cloud) Vertex ${usd(s.cost)}`;
+    this.status.text = `$(cloud) ${this.project() || 'no project'} · ${usd(s.cost)}`;
     this.status.tooltip = `Vertex spend this session (${s.requests} requests, project ${this.project() || 'not set'}). Click for details.`;
     this.changed.fire();
   }

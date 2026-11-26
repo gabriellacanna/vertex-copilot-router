@@ -2,7 +2,7 @@
   "name": "vertex-copilot-router",
   "displayName": "Vertex Router for GitHub Copilot",
   "description": "Use Claude and Gemini models from your own Google Cloud Vertex AI project inside GitHub Copilot Chat, with live cost tracking. Hard allowlist: only Anthropic and Google models can ever be called.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "lacanna",
   "license": "MIT",
   "repository": {
@@ -25,7 +25,9 @@
   ],
   "icon": "media/icon.png",
   "main": "./dist/extension.js",
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "extensionDependencies": [],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -42,7 +44,7 @@
     "languageModelChatProviders": [
       {
         "vendor": "vertex-copilot",
-        "displayName": "Vertex AI (Claude & Gemini)",
+        "displayName": "Vertex Models",
         "managementCommand": "vertexCopilot.selectProject"
       }
     ],
@@ -111,7 +113,7 @@
         "vertexCopilot.projectId": {
           "type": "string",
           "default": "",
-          "description": "GCP project whose Vertex AI quota and billing Copilot requests use."
+          "description": "GCP project for Vertex requests and billing. Leave empty to use your gcloud default project (gcloud config set project) or GOOGLE_CLOUD_PROJECT."
         },
         "vertexCopilot.location": {
           "type": "string",
@@ -163,16 +165,20 @@
         "vertexCopilot.auth.mode": {
           "type": "string",
           "enum": [
+            "auto",
+            "gcloud",
             "adc",
             "impersonate",
             "keyFile"
           ],
           "enumDescriptions": [
-            "Google Application Default Credentials (your gcloud user, or whatever GOOGLE_APPLICATION_CREDENTIALS points to)",
+            "Application Default Credentials if available, otherwise the gcloud CLI login",
+            "The account from `gcloud auth login` (uses the gcloud CLI)",
+            "Google Application Default Credentials only",
             "Impersonate a service account using your ADC user (no key file)",
             "Service account JSON key file"
           ],
-          "default": "adc",
+          "default": "auto",
           "scope": "application",
           "description": "How to authenticate to Google Cloud. User settings only."
         },
