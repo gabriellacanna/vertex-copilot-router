@@ -1,0 +1,71 @@
+# Vertex Router for GitHub Copilot
+
+Use **Claude** and **Gemini** from *your own* Google Cloud Vertex AI project directly in GitHub Copilot Chat (ask, edit and agent mode), billed to the project you pick, with live cost tracking inside VS Code.
+
+## The one rule: only Anthropic and Google models
+
+The extension can never call, ping, or list any other model vendor. Every outbound request goes through one function, [`src/guard.ts`](src/guard.ts), which rejects a request before it is sent unless it is:
+
+| Allowed | Pattern |
+|---|---|
+| Claude inference | `{region-}aiplatform.googleapis.com/v1/projects/{p}/locations/{l}/publishers/anthropic/models/claude-*:(stream)RawPredict` |
+| Gemini inference | `.../publishers/google/models/gemini-*:(stream)GenerateContent` |
+| Catalog listing (no inference) | `aiplatform.googleapis.com/v1beta1/publishers/(google\|anthropic)/models` |
+| Project picker | `cloudresourcemanager.googleapis.com/v3/projects:search` |
+
+Everything else is blocked: other publishers (Qwen, DeepSeek, Kimi/Moonshot, GLM/Zhipu, MiniMax, Llama, Mistral…), the Vertex OpenAI-compatible MaaS gateway, custom endpoints, Gemma, other hosts, plain http, redirects. A deny-list of Chinese model names is applied on top of the allowlist as a second layer. Model IDs you add in settings go through the same check, so they cannot widen it. See [`test/guard.test.mts`](test/guard.test.mts).
+
+## Setup
+
+1. Have VS Code 1.104 or newer with GitHub Copilot Chat signed in.
+2. Authenticate Google Cloud with Application Default Credentials:
+   ```bash
+   gcloud auth application-default login
+   ```
+3. Enable Claude models in Vertex AI Model Garden for your project (Gemini is on by default).
+4. Install the `.vsix` from [Releases](https://github.com/gabriellacanna/vertex-copilot-router/releases): **Extensions → … → Install from VSIX**.
+5. Run **Vertex Copilot: Select GCP Project**, or click *Manage* next to "Vertex AI (Claude & Gemini)" in Copilot's model picker → *Manage Models*.
+6. Pick a model such as *Claude Opus 5.5* or *Gemini 3.1 Pro* in the Copilot Chat model picker.
+
+## Features
+
+- **Copilot model provider** with streaming, tool calling (agent mode), Claude prompt caching, and replay of Claude thinking blocks and Gemini thought signatures between tool calls.
+- **Costs**: status bar shows this session's spend; the *Vertex Copilot → Costs* view breaks it down per model and per project (input, output, cache read/write tokens), with all-time totals and an optional budget warning (`vertexCopilot.budgetUsd`).
+- **Check Model Availability**: pings the allowlisted models you choose with a tiny request (a fraction of a cent, also counted in costs).
+- **Discover Claude/Gemini Models**: reads the Vertex catalog for the two allowed publishers and adds new IDs to `vertexCopilot.extraModels`.
+- **Select Vertex Location**: `global` (default) or a region such as `us-east5`.
+
+## Settings
+
+| Setting | Default | |
+|---|---|---|
+| `vertexCopilot.projectId` | `""` | GCP project used for requests and billing |
+| `vertexCopilot.location` | `global` | Vertex location |
+| `vertexCopilot.budgetUsd` | `0` | Warn when all-time spend for the project reaches this (0 = off) |
+| `vertexCopilot.extraModels` | `[]` | `{ id, name?, inputPer1M?, outputPer1M?, cacheReadPer1M?, maxInputTokens?, maxOutputTokens? }`; only `claude-*` / `gemini-*` IDs |
+
+Built-in prices are Vertex global-endpoint list prices as of November 2026. They are estimates; your Cloud Billing report is the source of truth. Override them through `extraModels` with the same `id`.
+
+## Security
+
+- **No secrets handled**: auth is Google ADC only. No API keys are stored, prompted for, or logged. Logs contain only model ID and token counts, never prompts or tokens.
+- **Untrusted workspaces**: `projectId`, `location` and `extraModels` from workspace settings are ignored until you trust the folder, so a cloned repo can't redirect your prompts or credentials to someone else's project.
+- **Input validation**: project IDs, locations and model IDs are regex-validated before they reach a URL; redirects are refused (`redirect: "error"`); the Anthropic SDK base URL is pinned so `ANTHROPIC_VERTEX_BASE_URL` can't reroute traffic.
+- **Dependencies**: four runtime packages (`@anthropic-ai/sdk`, `@anthropic-ai/vertex-sdk`, `google-auth-library`, and their transitive deps), all latest at release time, `npm audit` clean (a vulnerable `minimatch` in the `vsce` build tool is overridden to 11.0.9). CI fails on any advisory; Dependabot runs weekly.
+- **No webviews**: UI is native (tree view, status bar, quick picks), so there is no HTML surface to inject into.
+
+Report vulnerabilities privately via GitHub Security Advisories on this repository.
+
+## Build
+
+```bash
+npm ci
+npm run package
+```
+
+## Limits
+
+- Image input isn't enabled yet.
+- Token counts shown to Copilot before a request are estimates (~4 chars/token); costs come from the actual usage Vertex returns.
+- Multi-region endpoints (`us`, `eu`) aren't supported, only `global` and single regions.
+- Using third-party models in Copilot needs a Copilot plan that allows bring-your-own models; on Business/Enterprise plans your admin may have to enable it.

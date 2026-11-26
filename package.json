@@ -1,0 +1,184 @@
+{
+  "name": "vertex-copilot-router",
+  "displayName": "Vertex Router for GitHub Copilot",
+  "description": "Use Claude and Gemini models from your own Google Cloud Vertex AI project inside GitHub Copilot Chat, with live cost tracking. Hard allowlist: only Anthropic and Google models can ever be called.",
+  "version": "0.1.0",
+  "publisher": "gabriellacanna",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gabriellacanna/vertex-copilot-router"
+  },
+  "engines": {
+    "vscode": "^1.104.0"
+  },
+  "categories": [
+    "AI",
+    "Chat"
+  ],
+  "keywords": [
+    "copilot",
+    "vertex",
+    "claude",
+    "gemini",
+    "byok"
+  ],
+  "icon": "media/icon.png",
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "extensionDependencies": [],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Project, location and extra models from workspace settings are ignored in untrusted workspaces.",
+      "restrictedConfigurations": [
+        "vertexCopilot.projectId",
+        "vertexCopilot.location",
+        "vertexCopilot.extraModels"
+      ]
+    }
+  },
+  "contributes": {
+    "languageModelChatProviders": [
+      {
+        "vendor": "vertex-copilot",
+        "displayName": "Vertex AI (Claude & Gemini)",
+        "managementCommand": "vertexCopilot.selectProject"
+      }
+    ],
+    "commands": [
+      {
+        "command": "vertexCopilot.selectProject",
+        "title": "Select GCP Project",
+        "category": "Vertex Copilot"
+      },
+      {
+        "command": "vertexCopilot.selectLocation",
+        "title": "Select Vertex Location",
+        "category": "Vertex Copilot"
+      },
+      {
+        "command": "vertexCopilot.checkAvailability",
+        "title": "Check Model Availability",
+        "category": "Vertex Copilot"
+      },
+      {
+        "command": "vertexCopilot.discoverModels",
+        "title": "Discover Claude/Gemini Models",
+        "category": "Vertex Copilot"
+      },
+      {
+        "command": "vertexCopilot.resetCosts",
+        "title": "Reset Cost History",
+        "category": "Vertex Copilot",
+        "icon": "$(trash)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "vertexCopilot",
+          "title": "Vertex Copilot",
+          "icon": "media/activity.svg"
+        }
+      ]
+    },
+    "views": {
+      "vertexCopilot": [
+        {
+          "id": "vertexCopilot.costs",
+          "name": "Costs"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "vertexCopilot.resetCosts",
+          "when": "view == vertexCopilot.costs",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Vertex Copilot",
+      "properties": {
+        "vertexCopilot.projectId": {
+          "type": "string",
+          "default": "",
+          "description": "GCP project whose Vertex AI quota and billing Copilot requests use."
+        },
+        "vertexCopilot.location": {
+          "type": "string",
+          "default": "global",
+          "pattern": "^(global|[a-z]+-[a-z]+[0-9]+)$",
+          "description": "Vertex AI location. \"global\" is recommended for Claude and Gemini."
+        },
+        "vertexCopilot.budgetUsd": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Warn once when all-time spend for the current project reaches this many USD (0 = off)."
+        },
+        "vertexCopilot.extraModels": {
+          "type": "array",
+          "default": [],
+          "description": "Extra models to expose. Only IDs starting with claude- or gemini- are accepted; anything else is ignored.",
+          "items": {
+            "type": "object",
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^(claude|gemini)-[a-z0-9][a-z0-9.@-]*$"
+              },
+              "name": {
+                "type": "string"
+              },
+              "inputPer1M": {
+                "type": "number"
+              },
+              "outputPer1M": {
+                "type": "number"
+              },
+              "cacheReadPer1M": {
+                "type": "number"
+              },
+              "maxInputTokens": {
+                "type": "number"
+              },
+              "maxOutputTokens": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "esbuild src/extension.ts --bundle --platform=node --target=node22 --format=cjs --external:vscode --minify --sourcemap=external --outfile=dist/extension.js",
+    "test": "node --test test/*.test.mts",
+    "package": "npm run typecheck && npm test && npm run build && vsce package --no-dependencies",
+    "vscode:prepublish": "npm run build"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "1.14.0",
+    "@anthropic-ai/vertex-sdk": "1.1.3",
+    "google-auth-library": "11.3.4"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.7",
+    "@types/vscode": "1.104.0",
+    "@vscode/vsce": "4.1.1",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2"
+  },
+  "overrides": {
+    "google-auth-library": "$google-auth-library",
+    "minimatch": "11.0.9"
+  }
+}
