@@ -31,6 +31,8 @@ Everything else is blocked: other publishers (Qwen, DeepSeek, Kimi/Moonshot, GLM
 
 ## Features
 
+- **`@vertex` in Copilot Chat** (works even when BYOK models are blocked by policy): type `@vertex` in a **Local** chat session to talk to Claude/Gemini on your project directly. It keeps the conversation, reads `#file`/selection references, can use Copilot's agent tools (file edits, terminal, search; Copilot asks you to confirm as usual), and ends each answer with tokens and cost. `/model` switches the model (default Claude Opus 5.5).
+
 - **Copilot model provider** with streaming, tool calling (agent mode), Claude prompt caching, and replay of Claude thinking blocks and Gemini thought signatures between tool calls.
 - **Costs**: status bar shows this session's spend; the *Vertex Copilot → Costs* view breaks it down per model and per project (input, output, cache read/write tokens), with all-time totals and an optional budget warning (`vertexCopilot.budgetUsd`).
 - **Check Model Availability**: pings the allowlisted models you choose with a tiny request (a fraction of a cent, also counted in costs).
@@ -73,4 +75,5 @@ npm run package
 - Image input isn't enabled yet.
 - Token counts shown to Copilot before a request are estimates (~4 chars/token); costs come from the actual usage Vertex returns.
 - Multi-region endpoints (`us`, `eu`) aren't supported, only `global` and single regions.
-- Using third-party models in Copilot needs a Copilot plan that allows bring-your-own models; on Business/Enterprise plans your admin may have to enable it.
+- Neither the model picker nor `@vertex` works in Copilot **cloud/remote** sessions: those run on GitHub's servers, where VS Code extensions don't run. Use a Local session.
+- Using third-party models in Copilot's picker needs a Copilot plan that allows bring-your-own models; on Business/Enterprise plans your admin may have to enable it.

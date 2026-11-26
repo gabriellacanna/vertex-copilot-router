@@ -171,8 +171,20 @@ export type Streamer = (a: StreamArgs) => Promise<Usage>;
 
 export const SYSTEM_ROLE = 3; // LanguageModelChatMessageRole.System (proposed API) — Copilot sends it
 
-export const textOf = (parts: readonly unknown[]): string =>
-  parts.map(p => (p instanceof vscode.LanguageModelTextPart ? p.value : typeof p === 'string' ? p : '')).join('');
+export const textOf = (parts: readonly unknown[]): string => parts.map(partText).join('');
+
+// Tool results are often prompt-tsx JSON trees; pull the text leaves out rather than dropping them.
+function partText(p: unknown): string {
+  if (p instanceof vscode.LanguageModelTextPart) return p.value;
+  if (typeof p === 'string') return p;
+  const leaves: string[] = [];
+  const walk = (v: unknown, depth: number) => {
+    if (depth > 50 || v === null || typeof v !== 'object') return;
+    for (const [k, x] of Object.entries(v)) typeof x === 'string' && (k === 'text' || k === 'value') ? leaves.push(x) : walk(x, depth + 1);
+  };
+  walk((p as { value?: unknown })?.value ?? p, 0);
+  return leaves.join('');
+}
 
 /** Bounded memo so long sessions can't grow memory without limit. */
 export class Memo<V> extends Map<string, V> {
@@ -180,4 +192,15 @@ export class Memo<V> extends Map<string, V> {
     if (this.size >= 2000) this.delete(this.keys().next().value!);
     return super.set(k, v);
   }
+}
+
+/** Error text with a hint for auth problems. */
+export function explain(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (!/credential|invalid_grant|Could not load the default|unauthenticated|PERMISSION_DENIED|iam\.serviceAccounts/i.test(msg)) return msg;
+  const mode = cfg().get<string>('auth.mode', 'auto');
+  return `${msg} — ${mode === 'impersonate'
+    ? 'check that your ADC user has roles/iam.serviceAccountTokenCreator on the service account, and the account has roles/aiplatform.user'
+    : mode === 'keyFile' ? 'check the key file and that its service account has roles/aiplatform.user'
+    : 'run "gcloud auth login" (or "gcloud auth application-default login") and check you have roles/aiplatform.user'}. Change with "Vertex Copilot: Select Authentication".`;
 }

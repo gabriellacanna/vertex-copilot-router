@@ -1,10 +1,11 @@
 import * as vscode from 'vscode';
 import { isAllowedModel, LOCATION, PROJECT_ID } from './guard.ts';
 import type { ModelSpec } from './catalog.ts';
-import { catalog, cfg, currentProject, refreshDiscovered, SA_EMAIL, searchProjects, vertexCtx, type Streamer } from './vertex.ts';
+import { catalog, cfg, currentProject, explain, refreshDiscovered, SA_EMAIL, searchProjects, vertexCtx, type Streamer } from './vertex.ts';
 import { streamClaude } from './claude.ts';
 import { streamGemini } from './gemini.ts';
 import { CostTracker } from './costs.ts';
+import { createVertexParticipant } from './participant.ts';
 
 const log = vscode.window.createOutputChannel('Vertex Copilot', { log: true });
 const streamerFor = (m: ModelSpec): Streamer => (m.publisher === 'anthropic' ? streamClaude : streamGemini);
@@ -15,15 +16,6 @@ let prompted = false;
 // Settings go to the workspace when one is open, so each repo can target its own project.
 const target = () => (vscode.workspace.workspaceFolders?.length ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global);
 
-function explain(err: unknown): string {
-  const msg = err instanceof Error ? err.message : String(err);
-  if (!/credential|invalid_grant|Could not load the default|unauthenticated|PERMISSION_DENIED|iam\.serviceAccounts/i.test(msg)) return msg;
-  const mode = cfg().get<string>('auth.mode', 'auto');
-  return `${msg} — ${mode === 'impersonate'
-    ? 'check that your ADC user has roles/iam.serviceAccountTokenCreator on the service account, and the account has roles/aiplatform.user'
-    : mode === 'keyFile' ? 'check the key file and that its service account has roles/aiplatform.user'
-    : 'run "gcloud auth login" (or "gcloud auth application-default login") and check you have roles/aiplatform.user'}. Change with "Vertex Copilot: Select Authentication".`;
-}
 
 class VertexProvider implements vscode.LanguageModelChatProvider {
   private changed = new vscode.EventEmitter<void>();
@@ -94,6 +86,13 @@ export function activate(context: vscode.ExtensionContext) {
     log, costs.status,
     vscode.lm.registerLanguageModelChatProvider('vertex-copilot', provider),
     vscode.window.registerTreeDataProvider('vertexCopilot.costs', costs),
+    createVertexParticipant(costs, streamerFor),
+
+    vscode.commands.registerCommand('vertexCopilot.selectParticipantModel', async () => {
+      const current = cfg().get<string>('participant.model');
+      const pick = await vscode.window.showQuickPick(catalog().map(m => ({ label: m.id, description: m.name + (m.id === current ? ' (current)' : ''), detail: priceLabel(m) })), { title: 'Model for @vertex' });
+      if (pick) await cfg().update('participant.model', pick.label, vscode.ConfigurationTarget.Global);
+    }),
     vscode.workspace.onDidChangeConfiguration(e => { if (e.affectsConfiguration('vertexCopilot')) provider.refresh(); }),
     // Watch for project switches made with `gcloud config set project` while VS Code is open.
     vscode.window.onDidChangeWindowState(w => { if (w.focused) void currentProject().then(p => { if (p !== project) provider.refresh(); }); }),
