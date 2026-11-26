@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { isAllowedModel, LOCATION, PROJECT_ID } from './guard.ts';
-import type { ExtraModelSetting, ModelSpec } from './catalog.ts';
-import { catalog, cfg, listPublisherModels, SA_EMAIL, searchProjects, vertexCtx, type Streamer } from './vertex.ts';
+import type { ModelSpec } from './catalog.ts';
+import { catalog, cfg, refreshDiscovered, SA_EMAIL, searchProjects, vertexCtx, type Streamer } from './vertex.ts';
 import { streamClaude } from './claude.ts';
 import { streamGemini } from './gemini.ts';
 import { CostTracker } from './costs.ts';
@@ -29,10 +29,14 @@ class VertexProvider implements vscode.LanguageModelChatProvider {
   refresh() { this.changed.fire(); }
 
   provideLanguageModelChatInformation(options: vscode.PrepareLanguageModelChatModelOptions): vscode.LanguageModelChatInformation[] {
-    if (!PROJECT_ID.test(cfg().get<string>('projectId', ''))) {
+    const project = cfg().get<string>('projectId', '');
+    if (!PROJECT_ID.test(project)) {
       if (!options.silent) void vscode.commands.executeCommand('vertexCopilot.selectProject');
       return [];
     }
+    // Background refresh so the picker never waits on the network; fires a change when new models appear.
+    refreshDiscovered(project).then(n => { if (n.length) { log.info(`discovered ${n.join(', ')}`); this.refresh(); } },
+      err => log.warn(`model discovery failed: ${explain(err)}`));
     return catalog().map(m => ({
       id: m.id, name: m.name, family: m.publisher === 'anthropic' ? 'claude' : 'gemini', version: m.id,
       maxInputTokens: m.maxInput, maxOutputTokens: m.maxOutput,
@@ -145,18 +149,13 @@ export function activate(context: vscode.ExtensionContext) {
       });
     }),
 
-    vscode.commands.registerCommand('vertexCopilot.discoverModels', async () => {
+    vscode.commands.registerCommand('vertexCopilot.refreshModels', async () => {
       const { project } = await vertexCtx();
-      let ids: string[];
-      try { ids = [...await listPublisherModels('anthropic', project), ...await listPublisherModels('google', project)]; }
-      catch (err) { vscode.window.showErrorMessage(`Model discovery failed: ${explain(err)}`); return; }
-      const known = new Set(catalog().map(m => m.id));
-      const fresh = [...new Set(ids)].filter(id => !known.has(id)).sort();
-      if (!fresh.length) { vscode.window.showInformationMessage('No new Claude/Gemini models found in the Vertex catalog.'); return; }
-      const picks = await vscode.window.showQuickPick(fresh, { canPickMany: true, title: 'Add Claude/Gemini models to Copilot (prices unknown until you set them in settings)' });
-      if (!picks?.length) return;
-      const extra = cfg().get<ExtraModelSetting[]>('extraModels', []);
-      await update('extraModels', [...extra, ...picks.map(id => ({ id }))]);
+      try {
+        const fresh = await refreshDiscovered(project, 0);
+        provider.refresh();
+        vscode.window.showInformationMessage(fresh.length ? `New models: ${fresh.join(', ')}` : 'Model list is up to date.');
+      } catch (err) { vscode.window.showErrorMessage(`Model refresh failed: ${explain(err)}`); }
     }),
 
     vscode.commands.registerCommand('vertexCopilot.resetCosts', async () => {

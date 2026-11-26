@@ -7,7 +7,20 @@ import { buildCatalog, type ExtraModelSetting, type ModelSpec, type Usage } from
 export interface VertexCtx { project: string; location: string; host: string; auth: GoogleAuth }
 
 export const cfg = () => vscode.workspace.getConfiguration('vertexCopilot');
-export const catalog = (): ModelSpec[] => buildCatalog(cfg().get<ExtraModelSetting[]>('extraModels', []));
+// Models found in the Vertex catalog at runtime; user extraModels override them.
+let discovered: { at: number; ids: string[] } = { at: 0, ids: [] };
+const pretty = (id: string) => id.split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
+export const catalog = (): ModelSpec[] =>
+  buildCatalog([...discovered.ids.map(id => ({ id, name: pretty(id) })), ...cfg().get<ExtraModelSetting[]>('extraModels', [])]);
+
+/** Re-reads the Claude/Gemini catalog if older than maxAgeMs. Returns the newly found IDs. */
+export async function refreshDiscovered(project: string, maxAgeMs = 6 * 3600_000): Promise<string[]> {
+  if (Date.now() - discovered.at < maxAgeMs) return [];
+  const before = new Set(catalog().map(m => m.id));
+  const ids = [...new Set([...await listPublisherModels('anthropic', project), ...await listPublisherModels('google', project)])];
+  discovered = { at: Date.now(), ids };
+  return ids.filter(id => !before.has(id));
+}
 
 const SCOPES = ['https://www.googleapis.com/auth/cloud-platform'];
 export const SA_EMAIL = /^([a-z][a-z0-9-]{4,29}@[a-z][a-z0-9-]{4,29}\.iam\.gserviceaccount\.com|\d+-compute@developer\.gserviceaccount\.com)$/;
@@ -84,6 +97,9 @@ export async function searchProjects(): Promise<{ id: string; name: string }[]> 
   return out;
 }
 
+// Catalog entries that aren't text chat models (or need allowlisting by Google) are skipped.
+const isChatModel = (id: string) => !/embedding|image|tts|live|audio|robotics|cyber|customtools|native|computer-use|-exp/.test(id);
+
 /** Lists model IDs in Vertex's catalog for google/anthropic only. Listing is not inference. */
 export async function listPublisherModels(publisher: Publisher, quotaProject: string): Promise<string[]> {
   const ids: string[] = [];
@@ -92,7 +108,7 @@ export async function listPublisherModels(publisher: Publisher, quotaProject: st
     const d = await getJson(`https://aiplatform.googleapis.com/v1beta1/publishers/${publisher}/models?pageSize=200${page ? `&pageToken=${encodeURIComponent(page)}` : ''}`, quotaProject);
     for (const m of d.publisherModels ?? []) {
       const id = String(m.name ?? '').split('/').pop()!;
-      if (isAllowedModel(publisher, id)) ids.push(id);
+      if (isAllowedModel(publisher, id) && isChatModel(id) && (!m.launchStage || /^(GA|PUBLIC_PREVIEW)$/.test(m.launchStage))) ids.push(id);
     }
     if (!(page = d.nextPageToken)) break;
   }

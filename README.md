@@ -37,7 +37,7 @@ Everything else is blocked: other publishers (Qwen, DeepSeek, Kimi/Moonshot, GLM
 - **Copilot model provider** with streaming, tool calling (agent mode), Claude prompt caching, and replay of Claude thinking blocks and Gemini thought signatures between tool calls.
 - **Costs**: status bar shows this session's spend; the *Vertex Copilot → Costs* view breaks it down per model and per project (input, output, cache read/write tokens), with all-time totals and an optional budget warning (`vertexCopilot.budgetUsd`).
 - **Check Model Availability**: pings the allowlisted models you choose with a tiny request (a fraction of a cent, also counted in costs).
-- **Discover Claude/Gemini Models**: reads the Vertex catalog for the two allowed publishers and adds new IDs to `vertexCopilot.extraModels`.
+- **Always-current model list**: every 6 hours (and on **Refresh Model List**) the extension reads the Vertex catalog for the two allowed publishers and adds new Claude/Gemini chat models to the picker automatically. Built-in prices cover the current lineup; newly discovered models show "price unknown" until you set prices in `vertexCopilot.extraModels`.
 - **Select Vertex Location**: `global` (default) or a region such as `us-east5`.
 
 ## Settings
@@ -52,7 +52,7 @@ Everything else is blocked: other publishers (Qwen, DeepSeek, Kimi/Moonshot, GLM
 | `vertexCopilot.budgetUsd` | `0` | Warn when all-time spend for the project reaches this (0 = off) |
 | `vertexCopilot.extraModels` | `[]` | `{ id, name?, inputPer1M?, outputPer1M?, cacheReadPer1M?, maxInputTokens?, maxOutputTokens? }`; only `claude-*` / `gemini-*` IDs |
 
-Built-in prices are Vertex global-endpoint list prices as of November 2026. They are estimates; your Cloud Billing report is the source of truth. Override them through `extraModels` with the same `id`.
+Built-in models (Claude Opus/Sonnet/Haiku 5.5, Fable 5.1; Gemini 4 Argon/Carbon/Hydrogen, 3.8 Flash, 3.1 Pro preview, 3.5 Flash-Lite) and prices were checked against the docs on 2026-11-26; Gemini 4 Carbon/Hydrogen prices weren't published yet, so they show "price unknown". They are estimates; your Cloud Billing report is the source of truth. Override them through `extraModels` with the same `id`.
 
 ## Security
 
