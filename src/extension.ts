@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { isAllowedModel, LOCATION, PROJECT_ID } from './guard.ts';
 import type { ExtraModelSetting, ModelSpec } from './catalog.ts';
-import { catalog, cfg, listPublisherModels, searchProjects, vertexCtx, type Streamer } from './vertex.ts';
+import { catalog, cfg, listPublisherModels, SA_EMAIL, searchProjects, vertexCtx, type Streamer } from './vertex.ts';
 import { streamClaude } from './claude.ts';
 import { streamGemini } from './gemini.ts';
 import { CostTracker } from './costs.ts';
@@ -14,9 +14,12 @@ const target = () => (vscode.workspace.workspaceFolders?.length ? vscode.Configu
 
 function explain(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
-  return /credential|invalid_grant|Could not load the default/i.test(msg)
-    ? `${msg} — run "gcloud auth application-default login" and retry.`
-    : msg;
+  if (!/credential|invalid_grant|Could not load the default|unauthenticated|PERMISSION_DENIED|iam\.serviceAccounts/i.test(msg)) return msg;
+  const mode = cfg().get<string>('auth.mode', 'adc');
+  return `${msg} — ${mode === 'impersonate'
+    ? 'check that your ADC user has roles/iam.serviceAccountTokenCreator on the service account, and the account has roles/aiplatform.user'
+    : mode === 'keyFile' ? 'check the key file and that its service account has roles/aiplatform.user'
+    : 'run "gcloud auth application-default login" and check you have roles/aiplatform.user'}. Change with "Vertex Copilot: Select Authentication".`;
 }
 
 class VertexProvider implements vscode.LanguageModelChatProvider {
@@ -46,7 +49,7 @@ class VertexProvider implements vscode.LanguageModelChatProvider {
     const sub = token.onCancellationRequested(() => ac.abort());
     try {
       const usage = await streamerFor(model)({
-        ctx: vertexCtx(), model, messages, tools: options.tools ?? [], toolMode: options.toolMode,
+        ctx: await vertexCtx(), model, messages, tools: options.tools ?? [], toolMode: options.toolMode,
         progress, signal: ac.signal, maxTokens: Math.min(model.maxOutput, 64_000),
       });
       log.info(`${model.id} ok in=${usage.input} out=${usage.output} cacheRead=${usage.cacheRead} cacheWrite=${usage.cacheWrite}`);
@@ -94,13 +97,35 @@ export function activate(context: vscode.ExtensionContext) {
       if (loc) await update('location', loc);
     }),
 
+    vscode.commands.registerCommand('vertexCopilot.selectAuth', async () => {
+      const G = vscode.ConfigurationTarget.Global; // auth settings are user-level only
+      const pick = await vscode.window.showQuickPick([
+        { label: 'User credentials (ADC)', description: 'gcloud auth application-default login', mode: 'adc' as const },
+        { label: 'Impersonate a service account', description: 'recommended for service accounts: no key file, needs roles/iam.serviceAccountTokenCreator', mode: 'impersonate' as const },
+        { label: 'Service account key file', description: 'JSON key on disk (chmod 600)', mode: 'keyFile' as const },
+      ], { title: 'How should Vertex Copilot authenticate to Google Cloud?' });
+      if (!pick) return;
+      if (pick.mode === 'impersonate') {
+        const sa = await vscode.window.showInputBox({ prompt: 'Service account email', value: cfg().get('auth.serviceAccount'), validateInput: v => (SA_EMAIL.test(v.trim()) ? undefined : 'Not a service account email') });
+        if (!sa) return;
+        await cfg().update('auth.serviceAccount', sa.trim(), G);
+      } else if (pick.mode === 'keyFile') {
+        const file = await vscode.window.showOpenDialog({ canSelectMany: false, filters: { 'Service account key': ['json'] }, title: 'Select service account key' });
+        if (!file?.[0]) return;
+        await cfg().update('auth.keyFile', file[0].fsPath, G);
+      }
+      await cfg().update('auth.mode', pick.mode, G);
+      provider.refresh();
+      vscode.window.showInformationMessage(`Vertex Copilot auth: ${pick.label}.`);
+    }),
+
     vscode.commands.registerCommand('vertexCopilot.checkAvailability', async () => {
       const all = catalog();
       const picks = await vscode.window.showQuickPick(all.map(m => ({ label: m.id, description: m.name, picked: true, m })), { canPickMany: true, title: 'Ping models (sends a tiny real request, a fraction of a cent each)' });
       if (!picks?.length) return;
       log.show(true);
       await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Checking Vertex models', cancellable: true }, async (prog, token) => {
-        const ctx = vertexCtx();
+        const ctx = await vertexCtx();
         let ok = 0;
         for (const { m } of picks) {
           if (token.isCancellationRequested) break;
@@ -121,7 +146,7 @@ export function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand('vertexCopilot.discoverModels', async () => {
-      const { project } = vertexCtx();
+      const { project } = await vertexCtx();
       let ids: string[];
       try { ids = [...await listPublisherModels('anthropic', project), ...await listPublisherModels('google', project)]; }
       catch (err) { vscode.window.showErrorMessage(`Model discovery failed: ${explain(err)}`); return; }

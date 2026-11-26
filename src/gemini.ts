@@ -40,7 +40,7 @@ export const streamGemini: Streamer = async ({ ctx, model, messages, tools, tool
     generationConfig: { maxOutputTokens: maxTokens },
   };
   const url = `https://${ctx.host}/v1/projects/${ctx.project}/locations/${ctx.location}/publishers/google/models/${model.id}:streamGenerateContent?alt=sse`;
-  const res = await guardedFetch(url, { method: 'POST', headers: await authHeaders(), body: JSON.stringify(body), signal });
+  const res = await guardedFetch(url, { method: 'POST', headers: await authHeaders(undefined, ctx.auth), body: JSON.stringify(body), signal });
   if (!res.ok || !res.body) throw new Error(`Vertex Gemini HTTP ${res.status}: ${(await res.text()).slice(0, 500)}`);
 
   let usage: any = {};

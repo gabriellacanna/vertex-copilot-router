@@ -1,26 +1,67 @@
 import * as vscode from 'vscode';
-import { GoogleAuth } from 'google-auth-library';
+import { GoogleAuth, Impersonated, JWT } from 'google-auth-library';
+import { readFileSync, statSync } from 'node:fs';
 import { guardedFetch, isAllowedModel, LOCATION, PROJECT_ID, type Publisher } from './guard.ts';
 import { buildCatalog, type ExtraModelSetting, type ModelSpec, type Usage } from './catalog.ts';
-
-// Application Default Credentials only: the extension never stores or asks for secrets.
-export const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
 
 export interface VertexCtx { project: string; location: string; host: string; auth: GoogleAuth }
 
 export const cfg = () => vscode.workspace.getConfiguration('vertexCopilot');
 export const catalog = (): ModelSpec[] => buildCatalog(cfg().get<ExtraModelSetting[]>('extraModels', []));
 
-export function vertexCtx(): VertexCtx {
+const SCOPES = ['https://www.googleapis.com/auth/cloud-platform'];
+export const SA_EMAIL = /^([a-z][a-z0-9-]{4,29}@[a-z][a-z0-9-]{4,29}\.iam\.gserviceaccount\.com|\d+-compute@developer\.gserviceaccount\.com)$/;
+export type AuthMode = 'adc' | 'impersonate' | 'keyFile';
+
+// Credentials come from Google's own chain (gcloud ADC, impersonation, or a key file the user picks).
+// The extension never stores, prompts for, or logs a secret. Auth settings are application-scoped,
+// so a workspace's .vscode/settings.json can't switch identities.
+let cached: { key: string; auth: Promise<GoogleAuth> } | undefined;
+export function getAuth(): Promise<GoogleAuth> {
+  const mode = cfg().get<AuthMode>('auth.mode', 'adc');
+  const sa = cfg().get<string>('auth.serviceAccount', '').trim();
+  const keyFile = cfg().get<string>('auth.keyFile', '').trim();
+  const key = `${mode}|${sa}|${keyFile}`;
+  if (cached?.key === key) return cached.auth;
+  const auth = buildAuth(mode, sa, keyFile);
+  auth.catch(() => { if (cached?.key === key) cached = undefined; }); // retry after a fix
+  cached = { key, auth };
+  return auth;
+}
+
+async function buildAuth(mode: AuthMode, sa: string, keyFile: string): Promise<GoogleAuth> {
+  if (mode === 'impersonate') {
+    if (!SA_EMAIL.test(sa)) throw new Error('Set a valid service account email in "vertexCopilot.auth.serviceAccount".');
+    // Short-lived tokens minted from the user's ADC; no key ever touches disk.
+    const sourceClient = await new GoogleAuth({ scopes: SCOPES }).getClient();
+    return new GoogleAuth({ authClient: new Impersonated({ sourceClient, targetPrincipal: sa, targetScopes: SCOPES, lifetime: 3600 }) });
+  }
+  if (mode === 'keyFile') {
+    let st;
+    try { st = statSync(keyFile); } catch { throw new Error(`Service account key file not found: "${keyFile}".`); }
+    if (!st.isFile()) throw new Error(`"${keyFile}" is not a file.`);
+    if (process.platform !== 'win32' && st.mode & 0o077) throw new Error(`Key file "${keyFile}" is readable by other users; run: chmod 600 "${keyFile}"`);
+    // Only plain service-account keys: external_account / other configs can carry attacker-chosen URLs.
+    let k: any;
+    try { k = JSON.parse(readFileSync(keyFile, 'utf8')); } catch { throw new Error(`"${keyFile}" is not valid JSON.`); }
+    if (k?.type !== 'service_account' || !SA_EMAIL.test(k.client_email ?? '') || typeof k.private_key !== 'string')
+      throw new Error(`"${keyFile}" is not a Google service account key.`);
+    if (k.token_uri && k.token_uri !== 'https://oauth2.googleapis.com/token') throw new Error(`Refusing key file with unexpected token_uri.`);
+    return new GoogleAuth({ authClient: new JWT({ email: k.client_email, key: k.private_key, keyId: k.private_key_id, scopes: SCOPES }) });
+  }
+  return new GoogleAuth({ scopes: SCOPES });
+}
+
+export async function vertexCtx(): Promise<VertexCtx> {
   const project = cfg().get<string>('projectId', '').trim();
   const location = cfg().get<string>('location', 'global').trim();
   if (!PROJECT_ID.test(project)) throw new Error('No valid GCP project selected. Run "Vertex Copilot: Select GCP Project".');
   if (!LOCATION.test(location)) throw new Error(`Invalid Vertex location "${location}".`);
-  return { project, location, host: location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`, auth };
+  return { project, location, host: location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`, auth: await getAuth() };
 }
 
-export async function authHeaders(quotaProject?: string): Promise<Headers> {
-  const h = new Headers(await auth.getRequestHeaders());
+export async function authHeaders(quotaProject?: string, auth?: GoogleAuth): Promise<Headers> {
+  const h = new Headers(await (auth ?? await getAuth()).getRequestHeaders());
   h.set('content-type', 'application/json');
   if (quotaProject) h.set('x-goog-user-project', quotaProject);
   return h;

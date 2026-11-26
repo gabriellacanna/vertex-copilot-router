@@ -18,12 +18,17 @@ Everything else is blocked: other publishers (Qwen, DeepSeek, Kimi/Moonshot, GLM
 ## Setup
 
 1. Have VS Code 1.104 or newer with GitHub Copilot Chat signed in.
-2. Authenticate Google Cloud with Application Default Credentials:
-   ```bash
-   gcloud auth application-default login
-   ```
+2. Authenticate to Google Cloud (pick one with **Vertex Copilot: Select Authentication**):
+   - **User credentials (default)**: Application Default Credentials.
+     ```bash
+     gcloud auth application-default login
+     ```
+   - **Impersonate a service account (recommended for service accounts)**: your ADC user mints short-lived tokens for the service account, so no key file exists. Your user needs `roles/iam.serviceAccountTokenCreator` on the service account.
+   - **Service account key file**: a JSON key on disk. It must be `chmod 600`, and only plain `service_account` keys with Google's own token URI are accepted.
+
+   Whichever identity you use needs `roles/aiplatform.user` on the project. Auth settings are user-level only, so a workspace can't switch your identity.
 3. Enable Claude models in Vertex AI Model Garden for your project (Gemini is on by default).
-4. Install the `.vsix` from [Releases](https://github.com/gabriellacanna/vertex-copilot-router/releases): **Extensions → … → Install from VSIX**.
+4. Install **Vertex Router for GitHub Copilot** (`lacanna.vertex-copilot-router`) from the VS Code Marketplace, or the `.vsix` from [Releases](https://github.com/gabriellacanna/vertex-copilot-router/releases) via **Extensions → … → Install from VSIX**.
 5. Run **Vertex Copilot: Select GCP Project**, or click *Manage* next to "Vertex AI (Claude & Gemini)" in Copilot's model picker → *Manage Models*.
 6. Pick a model such as *Claude Opus 5.5* or *Gemini 3.1 Pro* in the Copilot Chat model picker.
 
@@ -39,6 +44,9 @@ Everything else is blocked: other publishers (Qwen, DeepSeek, Kimi/Moonshot, GLM
 
 | Setting | Default | |
 |---|---|---|
+| `vertexCopilot.auth.mode` | `adc` | `adc`, `impersonate` or `keyFile` (user settings only) |
+| `vertexCopilot.auth.serviceAccount` | `""` | Service account email for `impersonate` |
+| `vertexCopilot.auth.keyFile` | `""` | Path to a service account JSON key for `keyFile` |
 | `vertexCopilot.projectId` | `""` | GCP project used for requests and billing |
 | `vertexCopilot.location` | `global` | Vertex location |
 | `vertexCopilot.budgetUsd` | `0` | Warn when all-time spend for the project reaches this (0 = off) |
@@ -48,7 +56,7 @@ Built-in prices are Vertex global-endpoint list prices as of November 2026. They
 
 ## Security
 
-- **No secrets handled**: auth is Google ADC only. No API keys are stored, prompted for, or logged. Logs contain only model ID and token counts, never prompts or tokens.
+- **No secrets handled by the extension**: credentials come from Google's own auth chain (ADC, impersonation, or a key file you choose). Nothing is stored, prompted for, or logged. Logs contain only model ID and token counts, never prompts or tokens.
 - **Untrusted workspaces**: `projectId`, `location` and `extraModels` from workspace settings are ignored until you trust the folder, so a cloned repo can't redirect your prompts or credentials to someone else's project.
 - **Input validation**: project IDs, locations and model IDs are regex-validated before they reach a URL; redirects are refused (`redirect: "error"`); the Anthropic SDK base URL is pinned so `ANTHROPIC_VERTEX_BASE_URL` can't reroute traffic.
 - **Dependencies**: four runtime packages (`@anthropic-ai/sdk`, `@anthropic-ai/vertex-sdk`, `google-auth-library`, and their transitive deps), all latest at release time, `npm audit` clean (a vulnerable `minimatch` in the `vsce` build tool is overridden to 11.0.9). CI fails on any advisory; Dependabot runs weekly.

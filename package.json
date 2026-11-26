@@ -2,8 +2,8 @@
   "name": "vertex-copilot-router",
   "displayName": "Vertex Router for GitHub Copilot",
   "description": "Use Claude and Gemini models from your own Google Cloud Vertex AI project inside GitHub Copilot Chat, with live cost tracking. Hard allowlist: only Anthropic and Google models can ever be called.",
-  "version": "0.1.0",
-  "publisher": "gabriellacanna",
+  "version": "0.2.0",
+  "publisher": "lacanna",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -55,6 +55,11 @@
       {
         "command": "vertexCopilot.selectLocation",
         "title": "Select Vertex Location",
+        "category": "Vertex Copilot"
+      },
+      {
+        "command": "vertexCopilot.selectAuth",
+        "title": "Select Authentication",
         "category": "Vertex Copilot"
       },
       {
@@ -154,6 +159,34 @@
               }
             }
           }
+        },
+        "vertexCopilot.auth.mode": {
+          "type": "string",
+          "enum": [
+            "adc",
+            "impersonate",
+            "keyFile"
+          ],
+          "enumDescriptions": [
+            "Google Application Default Credentials (your gcloud user, or whatever GOOGLE_APPLICATION_CREDENTIALS points to)",
+            "Impersonate a service account using your ADC user (no key file)",
+            "Service account JSON key file"
+          ],
+          "default": "adc",
+          "scope": "application",
+          "description": "How to authenticate to Google Cloud. User settings only."
+        },
+        "vertexCopilot.auth.serviceAccount": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "Service account email to impersonate when auth.mode is \"impersonate\"."
+        },
+        "vertexCopilot.auth.keyFile": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "Absolute path to a service account JSON key when auth.mode is \"keyFile\". Must not be readable by other users."
         }
       }
     }
